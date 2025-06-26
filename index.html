@@ -48,10 +48,10 @@
     <span style="font-size:3rem;display:block;">Firehouse Alerting System</span>
   </h1>
   <div id="alertBox">No alerts yet</div>
-  <p id="status">Waiting for new alerts...</p>
+  <p id="status"></p>
 
   <p>Made by Concerned Citizen</p>
-  <p style="font-size:0.95rem;color:#888;margin-top:0.2rem;">Version: 1.1.1</p>
+  <p style="font-size:0.95rem;color:#888;margin-top:0.2rem;">Version: 1.2.2</p>
   <audio id="tone1" src="1st tone.mp3" preload="auto"></audio>
   <audio id="tone2" src="2 tone.mp3" preload="auto"></audio>
 
@@ -113,10 +113,11 @@
           const tone1 = document.getElementById("tone1");
           const tone2 = document.getElementById("tone2");
 
+          // Always set onended before playing
           tone1.onended = () => {
             tone1.onended = null;
             const speech = new SpeechSynthesisUtterance(text);
-            speech.lang = 'en-US'; // Set to 'fil-PH' for Tagalog
+            speech.lang = 'en-US';
             speech.onend = () => {
               tone2.currentTime = 0;
               tone2.play();
@@ -125,6 +126,7 @@
           };
           tone1.currentTime = 0;
           tone1.play().catch(() => {
+            // If play() fails (autoplay restrictions), fallback to just speaking
             const speech = new SpeechSynthesisUtterance(text);
             speech.lang = 'en-US';
             speech.onend = () => {
