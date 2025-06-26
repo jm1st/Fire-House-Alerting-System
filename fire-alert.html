@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Firehouse Alert System</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #111;
+      color: white;
+      text-align: center;
+      padding: 2rem;
+    }
+    #alertBox {
+      margin-top: 2rem;
+      padding: 2rem;
+      border: 4px solid red;
+      background-color: #300;
+      font-size: 1.5rem;
+      border-radius: 10px;
+    }
+    #status {
+      margin-top: 1rem;
+      font-style: italic;
+      color: #ccc;
+    }
+    .flash {
+      animation: flash-bg 1s 3;
+    }
+    @keyframes flash-bg {
+      0%, 100% { background-color: #111; }
+      20%, 60% { background-color: #ff0000; }
+      40%, 80% { background-color: #fff200; }
+    }
+  </style>
+</head>
+<body>
+  <h1>
+    ZAMBOANGA CITY FIRE DISTRICT <br>
+    Firehouse Alerting System</h1>
+  <div id="alertBox">No alerts yet</div>
+  <p id="status">Waiting for new alerts...</p>
+
+  <audio id="siren" src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" preload="auto"></audio>
+
+  <script>
+    const token = '7742982738:AAEKDUd43h9v6-TsZ8fRcfNopn2aDQjr1qY'; // Replace this
+    const chatId = -1002847077785; // Your channel ID (numeric)
+    let lastSpokenUpdateId = null;
+    let alertQueue = [];
+    let speaking = false;
+    let polling = false;
+
+    function flashScreen() {
+      document.body.classList.add('flash');
+      setTimeout(() => {
+        document.body.classList.remove('flash');
+      }, 3000); // 3 flashes (1s each)
+    }
+
+    function speakAlerts() {
+      if (speaking || alertQueue.length === 0) return;
+      speaking = true;
+      const { text, cb } = alertQueue.shift();
+
+      // Stop any ongoing speech
+      window.speechSynthesis.cancel();
+
+      // Play siren
+      document.getElementById("siren").play();
+
+      // Flash screen
+      flashScreen();
+
+      setTimeout(() => {
+        const speech = new SpeechSynthesisUtterance(text);
+        speech.lang = 'en-US';
+        speech.onend = () => {
+          speaking = false;
+          if (cb) cb();
+          speakAlerts(); // Speak next in queue
+        };
+        window.speechSynthesis.speak(speech);
+      }, 1200);
+    }
+
+    async function fetchAlert() {
+      try {
+        const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
+        const data = await response.json();
+
+        if (!data.ok || !Array.isArray(data.result)) {
+          document.getElementById("status").textContent = "Error: Couldn't fetch updates";
+          return;
+        }
+
+        const updates = data.result
+          .filter(update =>
+            update.channel_post &&
+            update.channel_post.chat.id === chatId &&
+            update.channel_post.text &&
+            (lastSpokenUpdateId === null || update.update_id > lastSpokenUpdateId)
+          )
+          .sort((a, b) => a.update_id - b.update_id);
+
+        if (updates.length > 0) {
+          const latest = updates[updates.length - 1];
+          const text = latest.channel_post.text;
+          document.getElementById("alertBox").textContent = text;
+          document.getElementById("status").textContent = "🚨 New alert received!";
+
+          // Queue all new messages for speech
+          updates.forEach(update => {
+            alertQueue.push({
+              text: update.channel_post.text,
+              cb: null
+            });
+          });
+
+          // Update last spoken update id
+          lastSpokenUpdateId = updates[updates.length - 1].update_id;
+          speakAlerts();
+        }
+      } catch (err) {
+        console.error(err);
+        document.getElementById("status").textContent = "Network or API error";
+      }
+    }
+
+    // Automatically start after page loads
+    window.addEventListener("DOMContentLoaded", async () => {
+      // Fetch latest update and set lastSpokenUpdateId to ignore old messages
+      try {
+        const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
+        const data = await response.json();
+        if (data.ok && Array.isArray(data.result)) {
+          // Find the latest update for this channel
+          const latest = data.result
+            .filter(update =>
+              update.channel_post &&
+              update.channel_post.chat.id === chatId &&
+              update.channel_post.text
+            )
+            .sort((a, b) => b.update_id - a.update_id)[0];
+          if (latest) {
+            lastSpokenUpdateId = latest.update_id;
+          }
+        }
+      } catch (e) {
+        // Ignore errors here, just start polling anyway
+      }
+      setInterval(fetchAlert, 500);
+      polling = true;
+      document.getElementById("status").textContent = "Listening for alerts...";
+    });
+  </script>
+</body>
+</html>
