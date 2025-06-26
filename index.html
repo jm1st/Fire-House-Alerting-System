@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ZCFD-FAS</title>
   <link rel="icon" type="image/png" href="ZCFD Logo.png">
   <style>
@@ -59,6 +60,8 @@
     const token = '7742982738:AAEKDUd43h9v6-TsZ8fRcfNopn2aDQjr1qY'; // Replace this
     const chatId = -1002847077785; // Your channel ID (numeric)
     let lastMessageId = null;
+    let queue = [];
+    let isPlaying = false;
 
     // Use localStorage to sync lastMessageId across tabs/windows
     function saveLastMessageId(id) {
@@ -80,6 +83,7 @@
     });
 
     async function fetchAlert() {
+      if (isPlaying || queue.length > 0) return; // Wait for queue to finish
       try {
         // Always sync with localStorage before fetching
         const storedId = loadLastMessageId();
@@ -95,46 +99,29 @@
           return;
         }
 
-        const updates = data.result.slice().reverse(); // Newest first
-        const latest = updates.find(update =>
+        // Only consider updates for our channel with text
+        const updates = data.result.filter(update =>
           update.channel_post &&
           update.channel_post.chat.id === chatId &&
           update.channel_post.text
         );
 
-        if (latest && latest.update_id !== lastMessageId) {
-          lastMessageId = latest.update_id;
-          saveLastMessageId(lastMessageId);
+        // Find all new updates (update_id > lastMessageId), sort oldest to newest
+        let newUpdates = [];
+        if (lastMessageId === null) {
+          // If first run, only process the latest message
+          if (updates.length > 0) {
+            const latest = updates[updates.length - 1];
+            newUpdates = [latest];
+          }
+        } else {
+          newUpdates = updates.filter(u => u.update_id > lastMessageId)
+                              .sort((a, b) => a.update_id - b.update_id);
+        }
 
-          const text = latest.channel_post.text;
-          document.getElementById("alertBox").textContent = text;
-
-          // Play 1st tone, then speak, then play 2nd tone
-          const tone1 = document.getElementById("tone1");
-          const tone2 = document.getElementById("tone2");
-
-          // Always set onended before playing
-          tone1.onended = () => {
-            tone1.onended = null;
-            const speech = new SpeechSynthesisUtterance(text);
-            speech.lang = 'en-US';
-            speech.onend = () => {
-              tone2.currentTime = 0;
-              tone2.play();
-            };
-            window.speechSynthesis.speak(speech);
-          };
-          tone1.currentTime = 0;
-          tone1.play().catch(() => {
-            // If play() fails (autoplay restrictions), fallback to just speaking
-            const speech = new SpeechSynthesisUtterance(text);
-            speech.lang = 'en-US';
-            speech.onend = () => {
-              tone2.currentTime = 0;
-              tone2.play();
-            };
-            window.speechSynthesis.speak(speech);
-          });
+        if (newUpdates.length > 0) {
+          queue = newUpdates;
+          playNextInQueue();
         }
       } catch (err) {
         console.error(err);
@@ -142,7 +129,66 @@
       }
     }
 
-    setInterval(fetchAlert, 500);
+    function playNextInQueue() {
+      if (queue.length === 0) {
+        isPlaying = false;
+        return;
+      }
+      isPlaying = true;
+      const update = queue.shift();
+      lastMessageId = update.update_id;
+      saveLastMessageId(lastMessageId);
+
+      const text = update.channel_post.text;
+      document.getElementById("alertBox").textContent = text;
+
+      // Format date/time from Telegram's 'date' (seconds since epoch)
+      const alertDate = new Date((update.channel_post.date || Date.now()) * 1000);
+      const dateStr = alertDate.toLocaleString();
+      document.getElementById("status").textContent = `Alert time: ${dateStr}`;
+
+      const tone1 = document.getElementById("tone1");
+      const tone2 = document.getElementById("tone2");
+
+      tone1.onended = () => {
+        tone1.onended = null;
+        window.speechSynthesis.cancel();
+        const speech = new SpeechSynthesisUtterance(text);
+        speech.lang = 'en-US';
+        speech.onend = () => {
+          tone2.currentTime = 0;
+          tone2.play();
+          tone2.onended = () => {
+            tone2.onended = null;
+            playNextInQueue();
+          };
+        };
+        speech.onerror = () => {
+          playNextInQueue();
+        };
+        window.speechSynthesis.speak(speech);
+      };
+      tone1.currentTime = 0;
+      tone1.play().catch(() => {
+        window.speechSynthesis.cancel();
+        const speech = new SpeechSynthesisUtterance(text);
+        speech.lang = 'en-US';
+        speech.onend = () => {
+          tone2.currentTime = 0;
+          tone2.play();
+          tone2.onended = () => {
+            tone2.onended = null;
+            playNextInQueue();
+          };
+        };
+        speech.onerror = () => {
+          playNextInQueue();
+        };
+        window.speechSynthesis.speak(speech);
+      });
+    }
+
+    setInterval(fetchAlert, 1000); // 1s interval is enough
   </script>
 </body>
 </html>
