@@ -5,190 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ZCFD-FAS</title>
   <link rel="icon" type="image/png" href="ZCFD Logo.png">
-  <style>
-    body {
-      font-family: sans-serif;
-      background-color: #111;
-      color: white;
-      text-align: center;
-      padding: 2rem;
-    }
-    h1, h2 {
-      font-family: 'Courier New', Courier, monospace;
-    }
-    p {
-      font-size: 1.2rem;
-      margin: 0.5rem 0;
-      font-family: 'Courier New', Courier, monospace;
-      font-style: italic;
-    }
-    #alertBox {
-      margin-top: 2rem;
-      padding: 2rem;
-      border: 4px solid red;
-      background-color: #300;
-      font-size: 1.5rem;
-      border-radius: 10px;
-    }
-    #status {
-      margin-top: 1rem;
-      font-style: italic;
-      color: #ccc;
-    }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div style="display:flex;justify-content:center;align-items:center;gap:2rem;margin-bottom:1.2rem;">
-    <img src="BFP Logo.png" alt="BFP Logo" style="height:180px;width:auto;">
-    <img src="ZCFD Logo.png" alt="ZCFD Logo" style="height:180px;width:auto;">
+  <div class="logos">
+    <img src="BFP Logo.png" alt="BFP Logo">
+    <img src="ZCFD Logo.png" alt="ZCFD Logo">
   </div>
-  
-  <h1 style="margin-bottom:0.5rem;">
-    <span style="font-size:2rem;display:block;">Bureau of Fire Protection</span>
-    <span style="font-size:2rem;display:block;">Zamboanga City Fire District</span>
-    <span style="font-size:3rem;display:block;">Firehouse Alerting System</span>
+  <h1>
+    <span>Bureau of Fire Protection</span>
+    <span>Zamboanga City Fire District</span>
+    Firehouse Alerting System
   </h1>
   <div id="alertBox">No alerts yet</div>
   <p id="status"></p>
-
+  <button id="startBtn">Stop Alerting</button>
   <p>Made by Concerned Citizen</p>
-  <p style="font-size:0.95rem;color:#888;margin-top:0.2rem;">Version: 1.2.2</p>
+  <p class="version">Version: 1.2.5</p>
   <audio id="tone1" src="1st tone.mp3" preload="auto"></audio>
   <audio id="tone2" src="2 tone.mp3" preload="auto"></audio>
-
-  <script>
-    const token = '7742982738:AAEKDUd43h9v6-TsZ8fRcfNopn2aDQjr1qY'; // Replace this
-    const chatId = -1002847077785; // Your channel ID (numeric)
-    let lastMessageId = null;
-    let queue = [];
-    let isPlaying = false;
-
-    // Use localStorage to sync lastMessageId across tabs/windows
-    function saveLastMessageId(id) {
-      try {
-        localStorage.setItem('ZCFD_FAS_LAST_ID', id);
-      } catch (e) {}
-    }
-    function loadLastMessageId() {
-      try {
-        return localStorage.getItem('ZCFD_FAS_LAST_ID');
-      } catch (e) { return null; }
-    }
-
-    // Listen for changes from other tabs
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'ZCFD_FAS_LAST_ID') {
-        lastMessageId = e.newValue ? Number(e.newValue) : null;
-      }
-    });
-
-    async function fetchAlert() {
-      if (isPlaying || queue.length > 0) return; // Wait for queue to finish
-      try {
-        // Always sync with localStorage before fetching
-        const storedId = loadLastMessageId();
-        if (storedId !== null && storedId !== lastMessageId) {
-          lastMessageId = Number(storedId);
-        }
-
-        const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates`);
-        const data = await response.json();
-
-        if (!data.ok || !Array.isArray(data.result)) {
-          document.getElementById("status").textContent = "Error: Couldn't fetch updates";
-          return;
-        }
-
-        // Only consider updates for our channel with text
-        const updates = data.result.filter(update =>
-          update.channel_post &&
-          update.channel_post.chat.id === chatId &&
-          update.channel_post.text
-        );
-
-        // Find all new updates (update_id > lastMessageId), sort oldest to newest
-        let newUpdates = [];
-        if (lastMessageId === null) {
-          // If first run, only process the latest message
-          if (updates.length > 0) {
-            const latest = updates[updates.length - 1];
-            newUpdates = [latest];
-          }
-        } else {
-          newUpdates = updates.filter(u => u.update_id > lastMessageId)
-                              .sort((a, b) => a.update_id - b.update_id);
-        }
-
-        if (newUpdates.length > 0) {
-          queue = newUpdates;
-          playNextInQueue();
-        }
-      } catch (err) {
-        console.error(err);
-        document.getElementById("status").textContent = "Network or API error";
-      }
-    }
-
-    function playNextInQueue() {
-      if (queue.length === 0) {
-        isPlaying = false;
-        return;
-      }
-      isPlaying = true;
-      const update = queue.shift();
-      lastMessageId = update.update_id;
-      saveLastMessageId(lastMessageId);
-
-      const text = update.channel_post.text;
-      document.getElementById("alertBox").textContent = text;
-
-      // Format date/time from Telegram's 'date' (seconds since epoch)
-      const alertDate = new Date((update.channel_post.date || Date.now()) * 1000);
-      const dateStr = alertDate.toLocaleString();
-      document.getElementById("status").textContent = `Alert time: ${dateStr}`;
-
-      const tone1 = document.getElementById("tone1");
-      const tone2 = document.getElementById("tone2");
-
-      tone1.onended = () => {
-        tone1.onended = null;
-        window.speechSynthesis.cancel();
-        const speech = new SpeechSynthesisUtterance(text);
-        speech.lang = 'en-US';
-        speech.onend = () => {
-          tone2.currentTime = 0;
-          tone2.play();
-          tone2.onended = () => {
-            tone2.onended = null;
-            playNextInQueue();
-          };
-        };
-        speech.onerror = () => {
-          playNextInQueue();
-        };
-        window.speechSynthesis.speak(speech);
-      };
-      tone1.currentTime = 0;
-      tone1.play().catch(() => {
-        window.speechSynthesis.cancel();
-        const speech = new SpeechSynthesisUtterance(text);
-        speech.lang = 'en-US';
-        speech.onend = () => {
-          tone2.currentTime = 0;
-          tone2.play();
-          tone2.onended = () => {
-            tone2.onended = null;
-            playNextInQueue();
-          };
-        };
-        speech.onerror = () => {
-          playNextInQueue();
-        };
-        window.speechSynthesis.speak(speech);
-      });
-    }
-
-    setInterval(fetchAlert, 1000); // 1s interval is enough
-  </script>
+  <script src="main.js"></script>
 </body>
 </html>
